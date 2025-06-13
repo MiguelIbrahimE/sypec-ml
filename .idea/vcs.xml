@@ -3,6 +3,5 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/sypec" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/sypec/backend/data/cache/requests" vcs="Git" />
   </component>
 </project>

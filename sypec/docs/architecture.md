@@ -1,2 +1,0 @@
-# Sypec – High-Level Architecture
-

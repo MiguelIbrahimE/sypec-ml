@@ -1,0 +1,58 @@
+\documentclass[11pt]{article}
+\usepackage{graphicx,xcolor}
+\usepackage[margin=1in]{geometry}
+
+% color scale for grades
+\definecolor{gradeA}{HTML}{4CAF50} % green
+\definecolor{gradeF}{HTML}{F44336} % red
+
+\begin{document}
+
+\begin{center}
+  \LARGE \textbf{Sustainability Report}\\[4pt]
+  \large {{ repo_name }}  ---  Score: \textbf{\textcolor{gradeA}{{ score }}} /100, Grade {{ grade }}
+\end{center}
+
+\section*{Introduction}
+This report evaluates the long-term sustainability of the project, using a single-pass
+LLM analysis augmented with heuristic energy modelling.
+
+\section*{Problems Identified}
+\begin{itemize}
+  {% for b in bullets[:3] %}
+    \item {{ b }}
+  {% endfor %}
+\end{itemize}
+
+\section*{Energy and Resource Trends}
+\begin{center}
+\includegraphics[width=0.8\linewidth]{ {{ energy_graph }} }
+\end{center}
+
+\begin{tabular}{|c|c|}
+\hline Users & Daily kWh \\\hline
+{% for u,v in kwh.items() %}
+{{ u }} & {{ "%.2f"|format(v) }} \\\hline
+{% endfor %}
+\end{tabular}
+
+\section*{Totals}
+Average daily energy (100 users): {{ "%.2f"|format(kwh["100"]) }} kWh \\
+Energy to generate this PDF: $\approx$ 0.01 kWh
+
+\section*{Sustainability Index}
+% simple color block
+\textcolor{gradeA}{\rule{ {{ score/2 }}pt }{10pt}} %
+
+\section*{How to Improve}
+\begin{itemize}
+  {% for b in bullets %}
+    \item {{ b }}
+  {% endfor %}
+\end{itemize}
+
+\section*{Notes on Estimations}
+Figures come from GPT-4o-mini (June 2025 weights) and should be taken as first-order
+approximations only.
+
+\end{document}
