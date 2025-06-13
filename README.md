@@ -10,3 +10,4 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 uvicorn backend.src.api:app --reload
 # sypec
+# sypec-ml
