@@ -1,150 +1,140 @@
 """
-ChatGPT-only sustainability analysis.
+ChatGPT-only sustainability analysis (V2).
 
 Workflow
 --------
-1. Clone the repo (shallow) to a temp dir with GitPython.
-2. Build a *digest* of the file tree: "relative/path.ext (loc)".
-3. Prompt GPT-4o-mini once.  The model must reply with minified JSON.
-4. Parse → dict.  Any model / parse failure returns a safe fallback.
+1. Shallow-clone repo with GitPython.
+2. Read .gitignore and skip ignored paths.
+3. Build digest "path (loc) [sha6]".
+4. Single GPT-4o-mini call → minified JSON.
+5. Parse → dict. Fallback JSON if anything fails.
 """
 from __future__ import annotations
 
-import json
-import os
-import tempfile
-import textwrap
+import json, os, tempfile, textwrap, hashlib, mimetypes
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, Any, List
 
 import git
 import openai
 from openai import OpenAIError
 from tenacity import retry, wait_fixed, stop_after_attempt, retry_if_exception_type
+import pathspec
 
 # ─── Config ──────────────────────────────────────────────────────────────
 openai.api_key = os.getenv("OPENAI_API_KEY", "")
 MODEL = "gpt-4o-mini"
-MAX_FILES_IN_DIGEST = 200  # limit prompt size
-MAX_LOC_PER_FILE = 6000    # ignore huge vendored blobs
+MAX_FILES = 200
+MAX_LOC = 6000
 RETRY = dict(wait=wait_fixed(2), stop=stop_after_attempt(3))
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
 def _clone_repo(url: str) -> Path:
-    """Shallow-clone into a temp folder; raise RuntimeError on failure."""
-    try:
-        tmp = tempfile.mkdtemp(prefix="sypec_repo_")
-        git.Repo.clone_from(url, tmp, depth=1, no_single_branch=True)
-        return Path(tmp)
-    except Exception as exc:
-        raise RuntimeError(f"git clone failed: {exc}") from exc
+    tmp = tempfile.mkdtemp(prefix="sypec_repo_")
+    git.Repo.clone_from(url, tmp, depth=1, no_single_branch=True)
+    return Path(tmp)
 
+def _gitignore_spec(repo: Path):
+    fp = repo / ".gitignore"
+    if not fp.exists():
+        return pathspec.PathSpec.from_lines("gitwildmatch", [])
+    return pathspec.PathSpec.from_lines("gitwildmatch", fp.read_text().splitlines())
 
-def _tree_digest(repo_path: Path) -> str:
-    """Return newline-separated 'path (loc)' lines, capped for prompt size."""
-    files: List[Path] = sorted(
-        p for p in repo_path.rglob("*")
-        if p.is_file() and p.stat().st_size < 128_000
-    )[:MAX_FILES_IN_DIGEST]
+def _tree_digest(repo: Path) -> str:
+    ignore = _gitignore_spec(repo)
+    files: List[Path] = []
+    for p in sorted(repo.rglob("*")):
+        rel = p.relative_to(repo)
+        if p.is_file() and not ignore.match_file(rel.as_posix()):
+            files.append(p)
+    files = files[:MAX_FILES]
 
-    digest_lines: List[str] = []
+    lines: List[str] = []
     for p in files:
-        rel = p.relative_to(repo_path)
+        rel = p.relative_to(repo)
+        if mimetypes.guess_type(p)[0] and mimetypes.guess_type(p)[0].startswith("image"):
+            continue
         try:
             loc = sum(1 for _ in p.open("r", errors="ignore"))
         except UnicodeDecodeError:
             loc = "binary"
-        # skip jumbo files
-        if isinstance(loc, int) and loc > MAX_LOC_PER_FILE:
+        if isinstance(loc, int) and loc > MAX_LOC:
             continue
-        digest_lines.append(f"{rel} ({loc})")
-    return "\n".join(digest_lines)
+        sha = hashlib.md5(rel.as_posix().encode()).hexdigest()[:6]
+        lines.append(f"{rel} ({loc}) [{sha}]")
+    return "\n".join(lines)
 
+# grading helper ----------------------------------------------------------
+_GRADES = "F D C B A A+ A++ A+++".split()
+def _grade(score: int) -> str:
+    idx = min(max(score, 0) // 15, len(_GRADES) - 1)
+    return _GRADES[idx]
 
 def _build_prompt(digest: str) -> str:
-    """Generate the single user prompt sent to the model."""
-    return textwrap.dedent(
-        f"""
-        You are a senior sustainability auditor.
-        Here is a file list with (lines-of-code) counts:
+    return textwrap.dedent(f"""
+    You are a rigorous software-sustainability auditor.
 
-        ```
-        {digest}
-        ```
+    The digest already excludes .gitignored files.
 
-        Estimate:
-        • total LOC & language mix
-        • CPU/memory hotspots
-        • daily kWh for 10,100,1000,10000 active users
-        • sustainability score 0-100
-        • letter grade F–A+++
-        • ≤6 improvement bullets
+    ```txt
+    {digest}
+    ```
 
-        Output EXACTLY this minified JSON schema, nothing else:
-        {{
-          "score": int,
-          "grade": str,
-          "kwh": {{"10": float,"100": float,"1000": float,"10000": float}},
-          "bullets": [str,...]
-        }}
-        """
-    ).strip()
+    Evaluate:
+    • language mix & doc coverage (README, docs/, FAQs)
+    • Dockerfile image size & RAM hints
+    • CI/tests presence, secrets exposure, auth flows
+    • Scalability & absence of spaghetti code
+    • Energy per language (Python>JS>Go>Rust>…)
+    • Estimate daily kWh for 10,100,1k,10k users: median & ±30 % dev
+    • kWh for this report ≈ 0.015
+    • Output 1-line intro + ≤6 bullets, score 0-100, grade F-A+++.
 
+    Return STRICT minified JSON:
+    {{
+      "intro": str,
+      "score": int,
+      "grade": str,
+      "kwh": {{"10":[float,float],"100":[...],"1000":[...],"10000":[...]}},
+      "bullets": [str,...]
+    }}
+    """).strip()
 
-# ─── Core function ───────────────────────────────────────────────────────
+# ─── OpenAI call ─────────────────────────────────────────────────────────
 @retry(**RETRY, retry=retry_if_exception_type(OpenAIError))
-def _call_openai(prompt: str) -> Dict[str, Any]:
-    """Call the chat model once and return parsed JSON or raise."""
-    response = openai.chat.completions.create(
+def _ask_openai(prompt: str) -> Dict[str, Any]:
+    resp = openai.chat.completions.create(
         model=MODEL,
         messages=[
             {"role": "system", "content": "Respond JSON only."},
             {"role": "user", "content": prompt},
         ],
         temperature=0.3,
-        max_tokens=300,
+        max_tokens=400,
     )
-    raw = response.choices[0].message.content.strip()
-    return json.loads(raw)  # can raise json.JSONDecodeError
+    return json.loads(resp.choices[0].message.content.strip())
 
-
+# ─── Main façade ─────────────────────────────────────────────────────────
 def analyse_repo(url: str) -> Dict[str, Any]:
-    """Public façade used by FastAPI route. Always returns a dict."""
-    result: Dict[str, Any] = {
-        "score": None,
-        "grade": "N/A",
-        "kwh": {},
-        "bullets": [],
-    }
-
-    # Step 1: clone
-    repo_path = _clone_repo(url)
-
-    # Step 2: digest
-    digest = _tree_digest(repo_path)
+    repo = _clone_repo(url)
+    digest = _tree_digest(repo)
     prompt = _build_prompt(digest)
 
-    # Step 3: OpenAI call
+    fallback = {
+        "intro": "Sustainability snapshot unavailable.",
+        "score": 50,
+        "grade": "C",
+        "kwh": {"10":[0.4,0.1],"100":[1.0,0.3],"1000":[10,3],"10000":[80,24]},
+        "bullets": ["Fallback response; check OpenAI key/config."],
+    }
+
     if not openai.api_key:
-        result.update(
-            score=0,
-            grade="F",
-            bullets=["OPENAI_API_KEY not set; returned fallback."],
-        )
-        return result
+        return fallback
 
     try:
-        ai_json = _call_openai(prompt)
-        result.update(ai_json)
-    except (OpenAIError, json.JSONDecodeError, KeyError) as exc:
-        # Fallback keeps service alive
-        result.update(
-            score=50,
-            grade="C",
-            bullets=[
-                "Could not parse model output.",
-                f"Error: {exc.__class__.__name__}",
-                "Add unit tests & CI cache",
-            ],
-        )
-    return result
+        ai = _ask_openai(prompt)
+        # ensure grade present
+        ai.setdefault("grade", _grade(ai.get("score", 0)))
+        return ai
+    except Exception:
+        return fallback
