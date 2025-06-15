@@ -39,7 +39,7 @@ pip install -r backend/requirements.txt
 uvicorn backend.src.api:app --reload --port 8000
 # Swagger UI → http://localhost:8000/docs
 ````
-# 5 5 User Manual 📖
+# 5 User Manual 📖
 
 See docs/USER_GUIDE.md for:
 
@@ -58,7 +58,7 @@ Which languages are scanned? Any text source; first-class support for Python, 
 
 More answers in docs/FAQ.md.
 
-# 7 ode & API Docs 🛠️
+# 7 Code & API Docs 🛠️
 
     docs/ARCHITECTURE.md — folder layout, data flow, extensibility hooks.
 
