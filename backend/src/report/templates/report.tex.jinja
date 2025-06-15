@@ -6,7 +6,7 @@
 \geometry{margin=1in}
 \setlength{\parskip}{1em}
 
-\title{Software Sustainability Audit \\ \large {{ repo_name }}}
+\title{Software Sustainability Audit \\ \Large {{ repo_name }}}
 \author{Sypec Static Auditor}
 \date{\today}
 
@@ -14,7 +14,7 @@
 \maketitle
 
 % -----------------------------------------------------------
-\section*{Repository}
+\section*{Repository Overview}
 \begin{itemize}[leftmargin=*]
   \item \textbf{Name}: {{ repo_name }}
   {% if repo_url is defined %}\item \textbf{URL}: \url{{ repo_url }}{% endif %}
@@ -25,25 +25,52 @@
 % -----------------------------------------------------------
 \section*{Scorecard}
 \begin{tabular}{rl}
-  \textbf{Grade} & {{ grade }}\\
+  \textbf{Grade} & {\Large\bfseries {{ grade }}}\\
   \textbf{Numeric Score} & {{ score }}/100\\
   \textbf{Total LOC} & {{ digest.total_loc }}\\
 \end{tabular}
 
 % -----------------------------------------------------------
-\section*{Energy Model}
-{% set _energy = energy
-                | default(energy_profile, true)
-                | default(kwh, true)
-                | default({}, true) %}
+\section*{Language Mix}
+Dominant language: \texttt{{ dominant_lang }} \\
 \begin{itemize}[leftmargin=*]
-  {% for users, val in _energy.items() %}
-    \item {{ users }} users $\rightarrow$ {{ "%.2f"|format(val) }} kWh / day
-  {% else %}
-    \item No energy data available.
+  {% for lang, n in languages.items() %}
+    \item {{ lang }} – {{ n }}
   {% endfor %}
 \end{itemize}
 
+% -----------------------------------------------------------
+\section*{External APIs}
+{% if apis_used %}
+  {{ apis_used|join(", ") }}
+{% else %}
+  None detected.
+{% endif %}
+
+% -----------------------------------------------------------
+\section*{Secrets Found}
+{% if secrets_found %}
+  \begin{itemize}[leftmargin=*]
+    {% for s in secrets_found %}
+      \item {{ s }}
+    {% endfor %}
+  \end{itemize}
+{% else %}
+  No obvious secrets committed.
+{% endif %}
+
+% -----------------------------------------------------------
+\section*{Energy Model}
+\vspace{-4pt}
+Std-dev across points: {{ "%.2f"|format(energy_stdev) }} kWh\\[4pt]
+\begin{center}
+  \includegraphics[width=0.8\linewidth]{ {{ energy_plot }} }
+\end{center}
+\begin{itemize}[leftmargin=*]
+  {% for u, e in energy_profile.items() %}
+    \item {{ u }} users $\rightarrow$ {{ "%.2f"|format(e) }} kWh / day
+  {% endfor %}
+\end{itemize}
 
 % -----------------------------------------------------------
 \section*{Hardware Profile (typical target)}
@@ -62,10 +89,9 @@
 \end{itemize}
 
 % -----------------------------------------------------------
-\section*{Key Warnings}
-{% set warn = warnings if warnings is defined else [] %}
+\section*{Top Warnings}
 \begin{enumerate}[label=\textbullet,leftmargin=*]
-  {% for w in warn[:10] %}
+  {% for w in warnings[:10] %}
     \item {{ w }}
   {% else %}
     \item No critical warnings – great job!
@@ -74,22 +100,15 @@
 
 % -----------------------------------------------------------
 \section*{Security Findings}
-{% set sec = security if security is defined else [] %}
-\begin{itemize}[leftmargin=*]
-  {% for s in sec %}
-    \item {{ s }}
-  {% else %}
-    \item No vulnerabilities detected.
-  {% endfor %}
-\end{itemize}
-
-% -----------------------------------------------------------
-\section*{Code Composition}
-\begin{itemize}[leftmargin=*]
-  {% for ext, loc in digest.extensions.items() %}
-    \item {{ ext }} – {{ loc }} LOC
-  {% endfor %}
-\end{itemize}
+{% if security %}
+  \begin{itemize}[leftmargin=*]
+    {% for s in security %}
+      \item {{ s }}
+    {% endfor %}
+  \end{itemize}
+{% else %}
+  No vulnerabilities detected.
+{% endif %}
 
 % -----------------------------------------------------------
 \section*{Test Coverage}
@@ -99,13 +118,14 @@ Estimated coverage: {{ "%.2f"|format(coverage.coverage_percent) }}\%
 
 % -----------------------------------------------------------
 \section*{Detected Code Smells}
-{% set sm = smells if smells is defined else [] %}
-\begin{itemize}[leftmargin=*]
-  {% for m in sm %}
-    \item {{ m }}
-  {% else %}
-    \item No obvious smells detected.
-  {% endfor %}
-\end{itemize}
+{% if smells %}
+  \begin{itemize}[leftmargin=*]
+    {% for m in smells %}
+      \item {{ m }}
+    {% endfor %}
+  \end{itemize}
+{% else %}
+  No obvious smells detected.
+{% endif %}
 
 \end{document}
