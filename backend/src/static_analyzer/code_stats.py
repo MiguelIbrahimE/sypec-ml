@@ -1,29 +1,31 @@
 # backend/src/static_analyzer/code_stats.py
 import os
-from collections import Counter
-from typing import Dict, Any
+import logging
+from pathlib import Path
 
-def analyze_code_stats(repo_path: str) -> Dict[str, Any]:
-    loc_counter = Counter()
-    ext_counter = Counter()
+logger = logging.getLogger(__name__)
 
-    for root, _, files in os.walk(repo_path):
-        for file in files:
-            path = os.path.join(root, file)
-            try:
-                with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                    lines = f.readlines()
-                    loc = len(lines)
-                    ext = os.path.splitext(file)[-1].lower()
-                    loc_counter[ext] += loc
-                    ext_counter[ext] += 1
-            except Exception:
-                continue
+def analyze_code_stats(digest: dict, repo_path: Path) -> dict:
+    logger.debug("Starting code stats analysis...")
+    loc = digest.get("total_loc", 0)
+    files = digest.get("files", [])
 
-    total_loc = sum(loc_counter.values())
+    issues = []
+    if loc == 0:
+        issues.append("Empty repository.")
+    if loc > 100_000:
+        issues.append("Repository is very large, consider modularizing.")
+    if not any(f["ext"] in [".md", ".rst"] for f in files):
+        issues.append("Missing documentation files.")
+
+    # Example: count Python files
+    python_files = [f for f in files if f["ext"] == ".py"]
+    if len(python_files) < 2:
+        issues.append("Few Python files detected.")
+
+    logger.debug(f"Code analysis complete: LOC={loc}, Python files={len(python_files)}")
     return {
-        "total_loc": total_loc,
-        "language_breakdown": dict(loc_counter),
-        "filetype_count": dict(ext_counter),
+        "loc": loc,
+        "file_count": len(files),
+        "warnings": issues,
     }
-

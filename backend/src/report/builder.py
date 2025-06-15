@@ -1,50 +1,47 @@
-from __future__ import annotations
-import subprocess, tempfile
+import os
 from pathlib import Path
-import matplotlib.pyplot as plt
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
+import subprocess
+import logging
+import uuid
 
-TEMPL_DIR = Path(__file__).parent / "templates"
-env = Environment(
-    loader=FileSystemLoader(str(TEMPL_DIR)),
-    autoescape=select_autoescape(["tex"]),
-)
+logger = logging.getLogger(__name__)
 
-def _make_plot(kwh: dict[str, float]) -> Path:
-    users = [int(u) for u in kwh]
-    vals  = [kwh[str(u)] for u in users]
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+REPORTS_DIR = Path("data/reports")
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    fig, ax = plt.subplots()
-    ax.bar([str(u) for u in users], vals)
-    ax.set_xlabel("Concurrent users")
-    ax.set_ylabel("Daily kWh")
-    fig.tight_layout()
+def generate_report(context: dict, repo_name: str) -> str:
+    try:
+        logger.info("Rendering LaTeX report...")
+        env = Environment(loader=FileSystemLoader(TEMPLATES_DIR))
+        template = env.get_template("report.tex.jinja")
 
-    tmpdir = Path(tempfile.mkdtemp())
-    img = tmpdir / "energy.png"
-    fig.savefig(img, dpi=180)
-    plt.close(fig)
-    return img
+        tex_content = template.render(context)
+        safe_name = repo_name.replace("/", "_").replace(":", "_")
+        report_id = f"{safe_name}_{uuid.uuid4().hex[:8]}"
+        report_path = REPORTS_DIR / report_id
+        report_path.mkdir(parents=True, exist_ok=True)
 
-def _run_tectonic(tex: Path, outdir: Path):
-    cmd = ["tectonic", "--outdir", str(outdir), "--print", "0", str(tex)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"Tectonic failed:\n{proc.stderr}")
+        tex_file = report_path / "report.tex"
+        pdf_file = report_path / "report.pdf"
 
-def build_pdf(data: dict, out_dir: Path) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
+        tex_file.write_text(tex_content)
 
-    img = _make_plot(data["kwh"])
-    tex_code = env.get_template("report.tex.jinja").render(**data, energy_graph=str(img))
+        logger.debug(f"Compiling LaTeX file at: {tex_file}")
+        subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", tex_file.name],
+            cwd=report_path,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
-    tmpdir = Path(tempfile.mkdtemp())
-    tex = tmpdir / "report.tex"
-    tex.write_text(tex_code, encoding="utf-8")
+        if not pdf_file.exists():
+            raise RuntimeError("PDF was not generated.")
 
-    _run_tectonic(tex, tmpdir)
-
-    pdf = tmpdir / "report.pdf"
-    final = out_dir / f"{data['repo_name']}.pdf"
-    final.write_bytes(pdf.read_bytes())
-    return final
+        logger.info(f"Report successfully generated at: {pdf_file}")
+        return str(pdf_file)
+    except Exception as e:
+        logger.exception("Failed to generate PDF report.")
+        raise

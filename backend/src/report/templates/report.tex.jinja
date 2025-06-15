@@ -1,58 +1,63 @@
-\documentclass[11pt]{article}
-\usepackage{graphicx,xcolor}
-\usepackage[margin=1in]{geometry}
+\documentclass{article}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{color}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\geometry{margin=1in}
+\setlength{\parskip}{1em}
 
-% color scale for grades
-\definecolor{gradeA}{HTML}{4CAF50} % green
-\definecolor{gradeF}{HTML}{F44336} % red
+\title{Software Audit Report}
+\author{Sypec Static Auditor}
+\date{\today}
 
 \begin{document}
 
-\begin{center}
-  \LARGE \textbf{Sustainability Report}\\[4pt]
-  \large {{ repo_name }}  ---  Score: \textbf{\textcolor{gradeA}{{ score }}} /100, Grade {{ grade }}
-\end{center}
+\maketitle
 
-\section*{Introduction}
-This report evaluates the long-term sustainability of the project, using a single-pass
-LLM analysis augmented with heuristic energy modelling.
+\section*{Repository Summary}
+\textbf{URL:} \url{{ repo_url }} \\
+\textbf{Name:} {{ repo_name }} \\
+\textbf{Purpose:} {{ purpose or "Not specified or could not be inferred." }}
 
-\section*{Problems Identified}
+\section*{Static Analysis Score}
+\textbf{Grade:} {{ grade }} \\
+\textbf{Score:} {{ score }} / 100 \\
+\textbf{Total Lines of Code:} {{ loc }} \\
+\textbf{Energy Usage Estimate (kWh):}
 \begin{itemize}
-  {% for b in bullets[:3] %}
-    \item {{ b }}
-  {% endfor %}
+    {% for users, kwh in energy_profile.items() %}
+        \item {{ users }} users: {{ kwh }} kWh
+    {% endfor %}
 \end{itemize}
 
-\section*{Energy and Resource Trends}
-\begin{center}
-\includegraphics[width=0.8\linewidth]{ {{ energy_graph }} }
-\end{center}
+\section*{Key Findings}
+\begin{enumerate}[label=\textbullet]
+    {% for warning in warnings %}
+        \item {{ warning }}
+    {% else %}
+        \item No critical issues detected.
+    {% endfor %}
+\end{enumerate}
 
-\begin{tabular}{|c|c|}
-\hline Users & Daily kWh \\\hline
-{% for u,v in kwh.items() %}
-{{ u }} & {{ "%.2f"|format(v) }} \\\hline
-{% endfor %}
-\end{tabular}
+\section*{Docker & Environment Usage}
+Estimated RAM: {{ docker.estimated_ram_mb }} MB \\
+Estimated Disk: {{ docker.estimated_disk_mb }} MB
 
-\section*{Totals}
-Average daily energy (100 users): {{ "%.2f"|format(kwh["100"]) }} kWh \\
-Energy to generate this PDF: $\approx$ 0.01 kWh
-
-\section*{Sustainability Index}
-% simple color block
-\textcolor{gradeA}{\rule{ {{ score/2 }}pt }{10pt}} %
-
-\section*{How to Improve}
+\section*{Security Report}
 \begin{itemize}
-  {% for b in bullets %}
-    \item {{ b }}
-  {% endfor %}
+    {% for sec in security %}
+        \item {{ sec }}
+    {% else %}
+        \item No security risks found.
+    {% endfor %}
 \end{itemize}
 
-\section*{Notes on Estimations}
-Figures come from GPT-4o-mini (June 2025 weights) and should be taken as first-order
-approximations only.
+\section*{Code Composition}
+\begin{itemize}
+    {% for ext, count in extensions.items() %}
+        \item {{ ext }}: {{ count }} lines
+    {% endfor %}
+\end{itemize}
 
 \end{document}
