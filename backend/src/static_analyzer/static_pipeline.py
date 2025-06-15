@@ -127,7 +127,7 @@ def run_static_pipeline(repo_path: Path) -> Dict[str, Any]:
                 "digest": digest,
                 "code_stats": code_stats,
                 "docker_stats": docker_stats,
-                "energy": energy_profile,
+                "energy_profile": energy_profile,
                 "security": security_report,
                 "coverage": test_coverage,
                 "smells": code_smells,

@@ -7,7 +7,7 @@
 \geometry{margin=1in}
 \setlength{\parskip}{1em}
 
-\title{Software Audit Report}
+\title{Software Audit Report -- {{ repo_name }}}
 \author{Sypec Static Auditor}
 \date{\today}
 
@@ -15,49 +15,56 @@
 
 \maketitle
 
+% ------------------------------------------------------------------
 \section*{Repository Summary}
-\textbf{URL:} \url{{ repo_url }} \\
+\textbf{URL:} {{ repo_url | default("N/A", true) }} \\
 \textbf{Name:} {{ repo_name }} \\
-\textbf{Purpose:} {{ purpose or "Not specified or could not be inferred." }}
+\textbf{Purpose:} {{ purpose | default("Not specified / could not be inferred.", true) }}
 
-\section*{Static Analysis Score}
+% ------------------------------------------------------------------
+\section*{Static-Analysis Score}
 \textbf{Grade:} {{ grade }} \\
 \textbf{Score:} {{ score }} / 100 \\
-\textbf{Total Lines of Code:} {{ loc }} \\
-\textbf{Energy Usage Estimate (kWh):}
+\textbf{Total Lines of Code:} {{ digest.total_loc }} \\
+
+\textbf{Energy-usage estimate (kWh):}
 \begin{itemize}
-    {% for users, kwh in energy_profile.items() %}
-        \item {{ users }} users: {{ kwh }} kWh
-    {% endfor %}
+{% for users, kwh in energy.items() %}
+    \item {{ users }} users: {{ "%.2f"|format(kwh) }} kWh
+{% endfor %}
 \end{itemize}
 
+% ------------------------------------------------------------------
 \section*{Key Findings}
 \begin{enumerate}[label=\textbullet]
-    {% for warning in warnings %}
-        \item {{ warning }}
-    {% else %}
-        \item No critical issues detected.
-    {% endfor %}
+{% for warning in warnings %}
+    \item {{ warning }}
+{% else %}
+    \item No critical issues detected.
+{% endfor %}
 \end{enumerate}
 
-\section*{Docker & Environment Usage}
-Estimated RAM: {{ docker.estimated_ram_mb }} MB \\
-Estimated Disk: {{ docker.estimated_disk_mb }} MB
+% ------------------------------------------------------------------
+\section*{Docker / Runtime Footprint}
+Estimated RAM: {{ docker_stats.estimated_ram_mb }} MB \\
+Estimated Disk: {{ docker_stats.estimated_disk_mb }} MB
 
+% ------------------------------------------------------------------
 \section*{Security Report}
 \begin{itemize}
-    {% for sec in security %}
-        \item {{ sec }}
-    {% else %}
-        \item No security risks found.
-    {% endfor %}
+{% for sec in security %}
+    \item {{ sec }}
+{% else %}
+    \item No security risks found.
+{% endfor %}
 \end{itemize}
 
+% ------------------------------------------------------------------
 \section*{Code Composition}
 \begin{itemize}
-    {% for ext, count in extensions.items() %}
-        \item {{ ext }}: {{ count }} lines
-    {% endfor %}
+{% for ext, count in digest.extensions.items() %}
+    \item {{ ext }} files: {{ count }} lines
+{% endfor %}
 \end{itemize}
 
 \end{document}
