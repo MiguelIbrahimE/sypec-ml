@@ -1,70 +1,111 @@
 \documentclass{article}
 \usepackage{geometry}
 \usepackage{graphicx}
-\usepackage{color}
 \usepackage{hyperref}
 \usepackage{enumitem}
 \geometry{margin=1in}
 \setlength{\parskip}{1em}
 
-\title{Software Audit Report -- {{ repo_name }}}
+\title{Software Sustainability Audit \\ \large {{ repo_name }}}
 \author{Sypec Static Auditor}
 \date{\today}
 
 \begin{document}
-
 \maketitle
 
-% ------------------------------------------------------------------
-\section*{Repository Summary}
-\textbf{URL:} {{ repo_url | default("N/A", true) }} \\
-\textbf{Name:} {{ repo_name }} \\
-\textbf{Purpose:} {{ purpose | default("Not specified / could not be inferred.", true) }}
-
-% ------------------------------------------------------------------
-\section*{Static-Analysis Score}
-\textbf{Grade:} {{ grade }} \\
-\textbf{Score:} {{ score }} / 100 \\
-\textbf{Total Lines of Code:} {{ digest.total_loc }} \\
-
-\textbf{Energy-usage estimate (kWh):}
-\begin{itemize}
-{% for users, kwh in energy.items() %}
-    \item {{ users }} users: {{ "%.2f"|format(kwh) }} kWh
-{% endfor %}
+% -----------------------------------------------------------
+\section*{Repository}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Name}: {{ repo_name }}
+  {% if repo_url is defined %}\item \textbf{URL}: \url{{ repo_url }}{% endif %}
+  \item \textbf{Purpose (inferred)}:\\
+        {{ purpose | default("Unable to infer – no README or description.", true) }}
 \end{itemize}
 
-% ------------------------------------------------------------------
-\section*{Key Findings}
-\begin{enumerate}[label=\textbullet]
-{% for warning in warnings %}
-    \item {{ warning }}
-{% else %}
-    \item No critical issues detected.
-{% endfor %}
+% -----------------------------------------------------------
+\section*{Scorecard}
+\begin{tabular}{rl}
+  \textbf{Grade} & {{ grade }}\\
+  \textbf{Numeric Score} & {{ score }}/100\\
+  \textbf{Total LOC} & {{ digest.total_loc }}\\
+\end{tabular}
+
+% -----------------------------------------------------------
+\section*{Energy Model}
+{% set _energy = energy
+                | default(energy_profile, true)
+                | default(kwh, true)
+                | default({}, true) %}
+\begin{itemize}[leftmargin=*]
+  {% for users, val in _energy.items() %}
+    \item {{ users }} users $\rightarrow$ {{ "%.2f"|format(val) }} kWh / day
+  {% else %}
+    \item No energy data available.
+  {% endfor %}
+\end{itemize}
+
+
+% -----------------------------------------------------------
+\section*{Hardware Profile (typical target)}
+\begin{itemize}[leftmargin=*]
+  \item CPU: {{ hardware.cpu }}
+  \item GPU: {{ hardware.gpu }}
+  \item RAM: {{ hardware.ram_gb }} GB
+  \item Idle draw: {{ hardware.kwh_per_hour }} kWh / h
+\end{itemize}
+
+% -----------------------------------------------------------
+\section*{Container Footprint}
+\begin{itemize}[leftmargin=*]
+  \item Estimated RAM: {{ docker_stats.estimated_ram_mb }} MB
+  \item Estimated Disk: {{ docker_stats.estimated_disk_mb }} MB
+\end{itemize}
+
+% -----------------------------------------------------------
+\section*{Key Warnings}
+{% set warn = warnings if warnings is defined else [] %}
+\begin{enumerate}[label=\textbullet,leftmargin=*]
+  {% for w in warn[:10] %}
+    \item {{ w }}
+  {% else %}
+    \item No critical warnings – great job!
+  {% endfor %}
 \end{enumerate}
 
-% ------------------------------------------------------------------
-\section*{Docker / Runtime Footprint}
-Estimated RAM: {{ docker_stats.estimated_ram_mb }} MB \\
-Estimated Disk: {{ docker_stats.estimated_disk_mb }} MB
-
-% ------------------------------------------------------------------
-\section*{Security Report}
-\begin{itemize}
-{% for sec in security %}
-    \item {{ sec }}
-{% else %}
-    \item No security risks found.
-{% endfor %}
+% -----------------------------------------------------------
+\section*{Security Findings}
+{% set sec = security if security is defined else [] %}
+\begin{itemize}[leftmargin=*]
+  {% for s in sec %}
+    \item {{ s }}
+  {% else %}
+    \item No vulnerabilities detected.
+  {% endfor %}
 \end{itemize}
 
-% ------------------------------------------------------------------
+% -----------------------------------------------------------
 \section*{Code Composition}
-\begin{itemize}
-{% for ext, count in digest.extensions.items() %}
-    \item {{ ext }} files: {{ count }} lines
-{% endfor %}
+\begin{itemize}[leftmargin=*]
+  {% for ext, loc in digest.extensions.items() %}
+    \item {{ ext }} – {{ loc }} LOC
+  {% endfor %}
+\end{itemize}
+
+% -----------------------------------------------------------
+\section*{Test Coverage}
+Files with tests: {{ coverage.test_files }} \\
+Python files analysed: {{ coverage.total_py }} \\
+Estimated coverage: {{ "%.2f"|format(coverage.coverage_percent) }}\%
+
+% -----------------------------------------------------------
+\section*{Detected Code Smells}
+{% set sm = smells if smells is defined else [] %}
+\begin{itemize}[leftmargin=*]
+  {% for m in sm %}
+    \item {{ m }}
+  {% else %}
+    \item No obvious smells detected.
+  {% endfor %}
 \end{itemize}
 
 \end{document}
