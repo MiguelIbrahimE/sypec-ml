@@ -1,6 +1,7 @@
 # backend/src/api.py
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
 from backend.src.static_analyzer.clone import clone_repo
 from backend.src.static_analyzer.static_pipeline import run_static_pipeline
@@ -20,6 +21,8 @@ logging.basicConfig(
 
 # ─── FastAPI App ────────────────────────────────────────
 app = FastAPI(title="Sypec – Static Auditor")
+app.mount("/reports", StaticFiles(directory="data/reports"), name="reports")
+
 
 # ─── Request Schema ─────────────────────────────────────
 class AnalyzeRequest(BaseModel):
