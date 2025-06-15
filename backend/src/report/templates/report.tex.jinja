@@ -3,82 +3,76 @@
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{enumitem}
+\usepackage{xcolor}
 \geometry{margin=1in}
 \setlength{\parskip}{1em}
 
-\title{Software Sustainability Audit \\ \Large {{ repo_name }}}
-\author{Sypec Static Auditor}
+\title{\Huge Software Sustainability Audit\\[2pt]\Large\ttfamily {{ repo_name }}}
+\author{Automated Static Auditor}
 \date{\today}
 
-\begin{document}
-\maketitle
+\begin{document}\maketitle
 
 % -----------------------------------------------------------
-\section*{Repository Overview}
+\section*{Project Summary}
 \begin{itemize}[leftmargin=*]
-  \item \textbf{Name}: {{ repo_name }}
-  {% if repo_url is defined %}\item \textbf{URL}: \url{{ repo_url }}{% endif %}
-  \item \textbf{Purpose (inferred)}:\\
-        {{ purpose | default("Unable to infer – no README or description.", true) }}
+  \item \textbf{Name}: \texttt{{ repo_name }}
+  {% if repo_url %}\item \textbf{URL}: \url{{ repo_url }}{% endif %}
+  \item \textbf{Purpose (AI-inferred)}:\\
+        {{ purpose | default("N/A", true) }}
 \end{itemize}
 
 % -----------------------------------------------------------
 \section*{Scorecard}
-\begin{tabular}{rl}
-  \textbf{Grade} & {\Large\bfseries {{ grade }}}\\
-  \textbf{Numeric Score} & {{ score }}/100\\
-  \textbf{Total LOC} & {{ digest.total_loc }}\\
+\begin{center}
+\begin{tabular}{lr}
+\textbf{Grade} (A+++ best) & \color{blue}\bfseries {{ grade }}\\
+\textbf{Numeric score} & {{ score }} / 100\\
+Total lines of code & {{ digest.total_loc }}\\
 \end{tabular}
+\end{center}
 
 % -----------------------------------------------------------
 \section*{Language Mix}
-Dominant language: \texttt{{ dominant_lang }} \\
+Dominant language: \texttt{{ dominant_lang }}
 \begin{itemize}[leftmargin=*]
-  {% for lang, n in languages.items() %}
-    \item {{ lang }} – {{ n }}
+  {% for lang,n in languages.items() %}
+    \item {{ lang }} – {{ n }} LOC
   {% endfor %}
 \end{itemize}
 
 % -----------------------------------------------------------
-\section*{External APIs}
-{% if apis_used %}
-  {{ apis_used|join(", ") }}
-{% else %}
-  None detected.
-{% endif %}
+\section*{External APIs Detected}
+{% if apis_used %}{{ apis_used|join(", ") }}{% else %}None detected.{% endif %}
 
 % -----------------------------------------------------------
-\section*{Secrets Found}
+\section*{Secrets Scan}
 {% if secrets_found %}
-  \begin{itemize}[leftmargin=*]
-    {% for s in secrets_found %}
-      \item {{ s }}
-    {% endfor %}
-  \end{itemize}
+  \color{red}\textbf{Potential secrets committed!}
 {% else %}
-  No obvious secrets committed.
+  No obvious secrets in revision.
 {% endif %}
 
 % -----------------------------------------------------------
 \section*{Energy Model}
-\vspace{-4pt}
-Std-dev across points: {{ "%.2f"|format(energy_stdev) }} kWh\\[4pt]
+Std-dev: {{ "%.2f"|format(energy_stdev) }} kWh \quad
+Median: {{ "%.2f"|format(energy_profile|map('float')|list|median) }} kWh
 \begin{center}
-  \includegraphics[width=0.8\linewidth]{ {{ energy_plot }} }
+  \includegraphics[width=.85\linewidth]{ {{ energy_plot }} }
 \end{center}
 \begin{itemize}[leftmargin=*]
-  {% for u, e in energy_profile.items() %}
+  {% for u,e in energy_profile.items()|sort %}
     \item {{ u }} users $\rightarrow$ {{ "%.2f"|format(e) }} kWh / day
   {% endfor %}
 \end{itemize}
 
 % -----------------------------------------------------------
-\section*{Hardware Profile (typical target)}
+\section*{Hardware Profile (target)}
 \begin{itemize}[leftmargin=*]
   \item CPU: {{ hardware.cpu }}
   \item GPU: {{ hardware.gpu }}
   \item RAM: {{ hardware.ram_gb }} GB
-  \item Idle draw: {{ hardware.kwh_per_hour }} kWh / h
+  \item Idle draw: {{ hardware.kwh_per_hour }} kWh/h
 \end{itemize}
 
 % -----------------------------------------------------------
@@ -90,22 +84,15 @@ Std-dev across points: {{ "%.2f"|format(energy_stdev) }} kWh\\[4pt]
 
 % -----------------------------------------------------------
 \section*{Top Warnings}
-\begin{enumerate}[label=\textbullet,leftmargin=*]
-  {% for w in warnings[:10] %}
-    \item {{ w }}
-  {% else %}
-    \item No critical warnings – great job!
-  {% endfor %}
+\begin{enumerate}[leftmargin=*]
+  {% for w in warnings[:10] %}\item {{ w }}{% endfor %}
+  {% if warnings|length == 0 %}\item No critical warnings – great job!{% endif %}
 \end{enumerate}
 
 % -----------------------------------------------------------
 \section*{Security Findings}
 {% if security %}
-  \begin{itemize}[leftmargin=*]
-    {% for s in security %}
-      \item {{ s }}
-    {% endfor %}
-  \end{itemize}
+  \begin{itemize}[leftmargin=*]{% for s in security %}\item {{ s }}{% endfor %}\end{itemize}
 {% else %}
   No vulnerabilities detected.
 {% endif %}
@@ -114,18 +101,21 @@ Std-dev across points: {{ "%.2f"|format(energy_stdev) }} kWh\\[4pt]
 \section*{Test Coverage}
 Files with tests: {{ coverage.test_files }} \\
 Python files analysed: {{ coverage.total_py }} \\
-Estimated coverage: {{ "%.2f"|format(coverage.coverage_percent) }}\%
+Estimated coverage: {{ "%.1f"|format(coverage.coverage_percent) }} \%
 
 % -----------------------------------------------------------
 \section*{Detected Code Smells}
 {% if smells %}
-  \begin{itemize}[leftmargin=*]
-    {% for m in smells %}
-      \item {{ m }}
-    {% endfor %}
-  \end{itemize}
+  \begin{itemize}[leftmargin=*]{% for m in smells %}\item {{ m }}{% endfor %}\end{itemize}
 {% else %}
   No obvious smells detected.
 {% endif %}
+
+% -----------------------------------------------------------
+\section*{Important Note}
+All energy numbers are \emph{first-order estimates}.
+Embodied and operational emissions were interpreted through the lens of the
+“Kaya for Computer Architects” model \cite{eeckhout_kaya_2022}.
+Large-language-model reasoning was used to infer project purpose and context.
 
 \end{document}

@@ -1,167 +1,205 @@
-# -*- coding: utf-8 -*-
+# backend/src/static_analyzer/static_pipeline.py
 """
-End-to-end static-analysis pipeline
+Refactored end-to-end static-analysis pipeline.
 
-• digests the repo (respecting .gitignore)
-• runs a bundle of lightweight, offline analysers
-• fetches a live hardware profile (Steam survey for desktop / placeholders for
-  cloud & mobile) and produces a naïve energy-usage model
-• renders a polished PDF report (LaTeX → PDF) that now contains a graph of the
-  energy curve ± σ (std-dev)
-
-Any expensive or network-bound step is cached or guarded by time-outs so the
-route stays responsive inside the container.
+ ▪ adds API-usage scan, secrets scan, language mix, energy stdev + plot
+ ▪ produces richer context for the LaTeX template consumed by report.builder
+ ▪ silences matplotlib’s verbose font-discovery DEBUG spam
 """
+
 from __future__ import annotations
 
 import logging
-import statistics as _stats
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from statistics import stdev, median
+from typing import Dict, List, Any
 
-import matplotlib                            # <-- run-time dep
-matplotlib.use("Agg")                        # headless
-import matplotlib.pyplot as _plt             # noqa: E402
+import matplotlib
+matplotlib.use("Agg")  # headless backend for container
 
-# ──────────── internal helpers ─────────────────────────────────────────
+# ── tame Matplotlib chatter (font_manager etc.) ───────────────────────────────
+logging.getLogger("matplotlib").setLevel(logging.INFO)
+logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
+
+import matplotlib.pyplot as plt  # noqa: E402  (after backend switch)
+
+# ── internal helpers ──────────────────────────────────────────────────────────
 from ..report.builder import generate_pdf_report
-from ..utils.git import clone_repo  # still used by /api, not here
+from ..utils.git import clone_repo  # noqa: F401  (kept for API parity)
 
-from .digest             import get_repo_digest
-from .code_stats         import analyze_code_stats
-from .code_smells        import detect_code_smells
-from .docker_stats       import estimate_docker_usage
-from .energy_model       import estimate_energy
-from .security           import run_security_checks
-from .purpose            import infer_project_purpose, infer_deployment_context
-from .test_coverage      import estimate_test_coverage
-from .hardware_profiles  import get_live_profile
-from .language_detector  import detect_languages
-from .api_usage          import find_api_usage
-from .secrets_scanner    import scan_for_secrets
+from .digest import get_repo_digest
+from .code_stats import analyze_code_stats, EXT_LANGUAGE_MAP
+from .code_smells import detect_code_smells
+from .docker_stats import estimate_docker_usage
+from .energy_model import estimate_energy
+from .security import run_security_checks, find_secrets
+from .purpose import infer_project_purpose, infer_deployment_context
+from .test_coverage import estimate_test_coverage
+from .hardware_profiles import get_live_profile
 
 logger = logging.getLogger(__name__)
 
-# Output folder (mounted to host via docker-compose volume)
+# output folder (mounted to host via docker-compose volume)
 REPORT_DIR = Path("data/reports")
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-
-# ──────────── helpers ─────────────────────────────────────────────────
-def _plot_energy(curve: Dict[int, float], target: Path) -> None:
-    """Save a simple log-log energy curve as PNG."""
-    users = sorted(curve)
-    vals  = [curve[u] for u in users]
-
-    _plt.figure(figsize=(4, 3))
-    _plt.loglog(users, vals, marker="o")
-    _plt.grid(True, which="both", ls=":")
-    _plt.xlabel("Active users")
-    _plt.ylabel("kWh per day")
-    _plt.tight_layout()
-    _plt.savefig(target, dpi=200)
-    _plt.close()
+# ──────────────────────────────────────────────────────────────────────────────
+# Helper utilities
+# ──────────────────────────────────────────────────────────────────────────────
+def _language_mix(digest: Dict[str, Any]) -> Dict[str, int]:
+    """Return {Language: LOC} sorted descending."""
+    mix: Dict[str, int] = {}
+    for ext, loc in digest["extensions"].items():
+        lang = EXT_LANGUAGE_MAP.get(ext, ext.lstrip(".").upper())
+        mix[lang] = mix.get(lang, 0) + loc
+    return dict(sorted(mix.items(), key=lambda kv: kv[1], reverse=True))
 
 
-# ──────────── public API ──────────────────────────────────────────────
+def _dominant_lang(lang_mix: Dict[str, int]) -> str:
+    return max(lang_mix, key=lang_mix.get) if lang_mix else "Unknown"
+
+
+def _scan_apis(repo: Path) -> List[str]:
+    """Tiny heuristic: search for common SDK imports or base-URLs."""
+    api_patterns = {
+        "OpenAI": r"(openai\.com|openai\s+import|Configuration\(api_key)",
+        "Stripe": r"(stripe\.com|import\s+stripe)",
+        "Twilio": r"(api\.twilio\.com|import\s+twilio)",
+        "AWS": r"(boto3|aws_secret_access_key)",
+        "GCP": r"(google\.cloud|GOOGLE_APPLICATION_CREDENTIALS)",
+    }
+    hits: set[str] = set()
+    for file in repo.rglob("*.*"):
+        try:
+            text = file.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue  # binary or unreadable
+        for name, pat in api_patterns.items():
+            if re.search(pat, text, re.I):
+                hits.add(name)
+    return sorted(hits)
+
+
+def _plot_energy(model: Dict[int, float], out_dir: Path) -> Path:
+    """Generate a PNG chart and return its path."""
+    users, kwh = zip(*sorted(model.items()))
+    fig = plt.figure(figsize=(4.5, 2.5))
+    plt.plot(users, kwh, marker="o", linewidth=2)
+    plt.fill_between(users, kwh, alpha=0.15)
+    plt.title("Estimated daily energy vs. active users")
+    plt.xlabel("Concurrent users")
+    plt.ylabel("kWh / day")
+    plt.grid(True, linestyle=":")
+    fig.tight_layout()
+    plot_path = out_dir / "energy.png"
+    fig.savefig(plot_path, dpi=160)
+    plt.close(fig)
+    return plot_path
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Public orchestrator
+# ──────────────────────────────────────────────────────────────────────────────
 def run_static_pipeline(repo_path: Path) -> Dict[str, Any]:
-    """Orchestrate all offline analysers and build the JSON + PDF payload."""
-    logger.debug("📂  Static pipeline started on %s", repo_path)
+    """
+    Run all offline analysers and generate a PDF + JSON payload.
 
-    # 1. file digest ----------------------------------------------------
+    The repository must already be cloned locally.
+    """
+    logger.info("📂  Static analysis on %s", repo_path)
+
+    # 1. Digest ----------------------------------------------------------------
     digest = get_repo_digest(repo_path)
-    logger.info("Digest done: %s files, %s LOC", len(digest["files"]), digest["total_loc"])
 
-    # 2. language mix & basic stats ------------------------------------
-    lang_breakdown, dominant_lang = detect_languages(repo_path)
+    # 2. Statistics & QA -------------------------------------------------------
     code_stats = analyze_code_stats(digest, repo_path)
-    apis_used  = find_api_usage(repo_path)
-    secrets    = scan_for_secrets(repo_path)
-    client_heavy = "typescript" in lang_breakdown
-    logger.debug("Langs=%s · APIs=%s · Secrets=%s", lang_breakdown, apis_used, len(secrets))
-
-    # 3. docker footprint, purpose, context ----------------------------
-    docker_stats = estimate_docker_usage(repo_path)
-    purpose      = infer_project_purpose(repo_path)
-    context      = infer_deployment_context(digest)
-    hw_profile   = get_live_profile(context)
-
-    # 4. energy model ---------------------------------------------------
-    energy_profile = estimate_energy(
-        code_stats,
-        docker_stats,
-        profile_hint=context,
-        api_list=apis_used,
-        client_heavy=client_heavy,
-    )
-    energy_stdev = _stats.pstdev(energy_profile.values()) if len(energy_profile) > 1 else 0.0
-
-    # 5. security, tests, smells ---------------------------------------
+    code_smells = detect_code_smells(str(repo_path))
+    test_coverage = estimate_test_coverage(repo_path)
     security_report = run_security_checks(repo_path)
-    test_coverage   = estimate_test_coverage(repo_path)
-    code_smells     = detect_code_smells(str(repo_path))
+    secrets_found = find_secrets(repo_path)
 
-    # 6. scoring & warnings --------------------------------------------
-    security_warns = security_report.get("warnings", []) if isinstance(security_report, dict) else security_report
-    code_warns     = code_stats.get("warnings", [])    if isinstance(code_stats, dict)    else code_stats
-    all_warnings   = security_warns + code_warns + code_smells + [f"Exposed secret: {s}" for s in secrets]
+    # 3. Languages -------------------------------------------------------------
+    lang_mix = _language_mix(digest)
+    dominant_lang = _dominant_lang(lang_mix)
 
-    score = max(1, min(100, 100 - len(all_warnings) * 5))
-    grade = ("A+++" if score >= 95 else "A" if score >= 85 else "B+" if score >= 75
-    else "B" if score >= 65 else "C" if score >= 50 else "D" if score >= 30 else "F")
-    logger.info("✅  Score=%s · Grade=%s · Warnings=%s", score, grade, len(all_warnings))
+    # 4. Purpose / context / hardware -----------------------------------------
+    purpose = infer_project_purpose(repo_path)
+    context = infer_deployment_context(digest)  # “desktop” / “cloud” / “mobile”
+    hw_profile = get_live_profile(context)
 
-    # 7. reporting ------------------------------------------------------
-    ts          = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    report_base = REPORT_DIR / f"report_{repo_path.name}_{ts}"
-    plot_path   = report_base.with_suffix("") / "energy_plot.png"
-    plot_path.parent.mkdir(parents=True, exist_ok=True)
-    _plot_energy(energy_profile, plot_path)
+    # 5. Docker footprint + energy --------------------------------------------
+    docker_stats = estimate_docker_usage(repo_path)
+    energy_model = estimate_energy(code_stats, docker_stats, context)
+    energy_stdev = stdev(energy_model.values()) if len(energy_model) > 1 else 0.0
+    energy_median = median(energy_model.values())
 
-    pdf_path = None
+    # 6. Visualisation ---------------------------------------------------------
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    report_base = REPORT_DIR / f"report_{repo_path.name}_{timestamp}"
+    report_base.mkdir(parents=True, exist_ok=True)
+    energy_plot = _plot_energy(energy_model, report_base)
+
+    # 7. APIs & warnings -------------------------------------------------------
+    apis_used = _scan_apis(repo_path)
+    warnings_all = (
+            code_stats.get("warnings", [])
+            + security_report.get("warnings", [])
+            + code_smells
+            + (["Secrets committed"] if secrets_found else [])
+    )
+    score = max(1, min(100, 100 - 5 * len(warnings_all)))
+    grade = (
+        "A+++" if score >= 95 else
+        "A"    if score >= 85 else
+        "B+"   if score >= 75 else
+        "B"    if score >= 65 else
+        "C"    if score >= 50 else
+        "D"    if score >= 30 else
+        "F"
+    )
+
+    # 8. PDF generation --------------------------------------------------------
     try:
         pdf_path = generate_pdf_report(
             output_base=report_base,
-            ctx={
-                "repo_name": repo_path.name,
-                "digest": digest,
-                "purpose": purpose,
-                "hardware": hw_profile,
-                "docker_stats": docker_stats,
-                "code_stats": code_stats,
-                "languages": lang_breakdown,
-                "dominant_lang": dominant_lang,
-                "apis_used": apis_used,
-                "secrets_found": secrets,
-                "energy_profile": energy_profile,
-                "energy_stdev": round(energy_stdev, 2),
-                "security": security_report,
-                "coverage": test_coverage,
-                "smells": code_smells,
-                "score": score,
-                "grade": grade,
-                "warnings": all_warnings,
-                "energy_plot": plot_path.name,
-            },
+            ctx=dict(
+                repo_name=repo_path.name,
+                repo_url=str(repo_path),
+                purpose=purpose,
+                hardware=hw_profile,
+                digest=digest,
+                code_stats=code_stats,
+                docker_stats=docker_stats,
+                energy_profile=energy_model,
+                energy_stdev=energy_stdev,
+                energy_plot=energy_plot.name,
+                security=security_report.get("findings", []),
+                coverage=test_coverage,
+                smells=code_smells,
+                warnings=warnings_all,
+                score=score,
+                grade=grade,
+                dominant_lang=dominant_lang,
+                languages=lang_mix,
+                apis_used=apis_used,
+                secrets_found=secrets_found,
+            ),
         )
-        logger.debug("PDF generated at %s", pdf_path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF generation failed: %s", exc, exc_info=True)
+        pdf_path = None
 
-    # 8. JSON -----------------------------------------------------------
+    # 9. JSON response ---------------------------------------------------------
     return {
-        "intro":   f"Static analysis of {repo_path.name}",
-        "purpose": purpose[:300],
+        "intro": f"Static analysis of {repo_path.name}",
+        "purpose": purpose[:280],
         "hardware": hw_profile,
-        "languages": lang_breakdown,
-        "apis_used": apis_used,
-        "secrets_found": secrets,
-        "score":   score,
-        "grade":   grade,
-        "kwh":     energy_profile,
-        "energy_stdev": energy_stdev,
+        "score": score,
+        "grade": grade,
+        "kwh": energy_model,
         "test_coverage": test_coverage,
-        "bullets": all_warnings[:6],
-        "pdf_url": f"/reports/{pdf_path.relative_to(REPORT_DIR).parent.name}/{pdf_path.name}" if pdf_path else None,
+        "bullets": warnings_all[:6],
+        "pdf_url": f"/reports/{pdf_path.name}" if pdf_path else None,
     }
