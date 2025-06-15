@@ -1,0 +1,9 @@
+services:
+  sypec:
+    build: .                     # build context is repo root
+    container_name: sypec-static-auditor
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/reports:/app/data/reports
+    restart: unless-stopped
