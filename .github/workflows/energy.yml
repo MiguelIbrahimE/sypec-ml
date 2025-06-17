@@ -1,0 +1,30 @@
+# .github/workflows/energy.yml
+name: Energy / resource audit
+
+on: [push, pull_request]
+
+jobs:
+  energy:
+    # needs a runner that exposes power counters
+    # · self-hosted Linux box   – *best*
+    # · macOS runner            – use `powermetrics`
+    # GitHub-hosted Ubuntu ≃ no sensor → script prints “n/a”
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # install project deps (example: node)
+      - run: npm ci
+
+      # grab a one-shot power+RAM/CPU snapshot while tests run
+      - name: Run tests & measure energy
+        run: |
+          chmod +x tools/energy_wrap.sh
+          tools/energy_wrap.sh npm test
+
+      # make the JSON/CSV log downloadable from the run page
+      - uses: actions/upload-artifact@v3
+        with:
+          name: energy-log
+          path: energy_log.*
